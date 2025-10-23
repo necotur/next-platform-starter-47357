@@ -1,0 +1,432 @@
+
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/seamless_smile_tracker/app/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model User {
+  id            String    @id @default(cuid())
+  username      String    @unique
+  email         String?   @unique
+  password      String
+  fullName      String?
+  emailVerified DateTime?
+  image         String?
+  role          String    @default("patient") // "patient", "doctor", or "admin"
+  
+  // Doctor-specific fields
+  specialty     String?
+  clinicName    String?
+  phoneNumber   String?
+  licenseNumber String?
+  
+  // Patient-specific fields
+  smile3dPortalUrl String?  // External link to 3D portal (visible to doctors)
+  
+  // One-time login credentials
+  oneTimePassword String?    // Temporary password for first login
+  oneTimePasswordUsed Boolean @default(false)
+  oneTimePasswordExpires DateTime?
+  
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  treatmentPlan      TreatmentPlan?
+  wearTimeLogs       WearTimeLog[]
+  symptomLogs        SymptomLog[]
+  progressPhotos     ProgressPhoto[]
+  userAchievements   UserAchievement[]
+  notificationSettings NotificationSettings?
+  
+  // Doctor relationships
+  doctorPatients     DoctorPatient[] @relation("DoctorToPatients")
+  patientDoctors     DoctorPatient[] @relation("PatientToDoctors")
+  
+  // Chat relationships
+  sentMessages       ChatMessage[] @relation("SentMessages")
+  receivedMessages   ChatMessage[] @relation("ReceivedMessages")
+  
+  // Doctor notes
+  doctorNotes        DoctorNote[] @relation("DoctorNotes")
+  doctorNotesAbout   DoctorNote[] @relation("PatientNotes")
+  
+  // Invitations sent (as doctor)
+  sentInvitations    DoctorInvitation[] @relation("DoctorInvitations")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model TreatmentPlan {
+  id                    String   @id @default(cuid())
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  startDate             DateTime
+  expectedEndDate       DateTime?
+  totalAligners         Int
+  currentAlignerNumber  Int      @default(1)
+  
+  alignerChangeInterval Int      @default(14) // Days between changes (7, 10, or 14)
+  dailyWearTimeGoal     Int      @default(22) // Hours per day
+  
+  viewMode              String   @default("patient") // "patient" or "doctor"
+  
+  lastAlignerChangeDate DateTime @default(now())
+  nextAlignerChangeDate DateTime
+  
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model WearTimeLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  date      DateTime @default(now())
+  hoursWorn Float    @default(0)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, date])
+  @@index([userId, date])
+}
+
+model SymptomLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  date        DateTime @default(now())
+  symptomType String   // "pain", "discomfort", "soreness", "sensitivity", "other"
+  severity    String   // "mild", "moderate", "severe"
+  notes       String?  @db.Text
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([userId, date])
+}
+
+model ProgressPhoto {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  alignerNumber   Int
+  photoType       String   // "front", "left", "right"
+  cloudStoragePath String  // S3 path
+  thumbnailPath   String?  // Optional thumbnail
+  
+  capturedAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  
+  @@index([userId, alignerNumber])
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String
+  icon        String
+  requirement String   // JSON string describing requirement
+  
+  createdAt   DateTime @default(now())
+  
+  userAchievements UserAchievement[]
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  
+  unlockedAt    DateTime @default(now())
+  
+  @@unique([userId, achievementId])
+}
+
+model NotificationSettings {
+  id                        String   @id @default(cuid())
+  userId                    String   @unique
+  user                      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  dailyReminderEnabled      Boolean  @default(true)
+  dailyReminderTime         String   @default("21:00") // HH:mm format
+  
+  alignerChangeReminderEnabled Boolean @default(true)
+  
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+model DoctorPatient {
+  id          String   @id @default(cuid())
+  doctorId    String
+  doctor      User     @relation("DoctorToPatients", fields: [doctorId], references: [id], onDelete: Cascade)
+  patientId   String
+  patient     User     @relation("PatientToDoctors", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  status      String   @default("active") // "active", "inactive", "disconnected"
+  connectedAt DateTime @default(now())
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@unique([doctorId, patientId])
+  @@index([doctorId])
+  @@index([patientId])
+}
+
+model DoctorInvitation {
+  id          String   @id @default(cuid())
+  doctorId    String
+  doctor      User     @relation("DoctorInvitations", fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  inviteCode  String   @unique
+  inviteType  String   // "link", "code", "qr"
+  
+  expiresAt   DateTime?
+  usedBy      String?  // Patient user ID who used this invitation
+  usedAt      DateTime?
+  
+  maxUses     Int      @default(1)
+  currentUses Int      @default(0)
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([doctorId])
+  @@index([inviteCode])
+}
+
+model ChatMessage {
+  id          String   @id @default(cuid())
+  senderId    String
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+  
+  messageType String   @default("text") // "text", "photo", "system"
+  content     String   @db.Text
+  photoUrl    String?  // Cloud storage path if message contains photo
+  
+  isRead      Boolean  @default(false)
+  readAt      DateTime?
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([senderId, receiverId, createdAt])
+  @@index([receiverId, isRead])
+}
+
+model DoctorNote {
+  id          String   @id @default(cuid())
+  doctorId    String
+  doctor      User     @relation("DoctorNotes", fields: [doctorId], references: [id], onDelete: Cascade)
+  patientId   String
+  patient     User     @relation("PatientNotes", fields: [patientId], references: [id], onDelete: Cascade)
+  
+  noteType    String   @default("general") // "general", "treatment", "clinical", "reminder"
+  title       String?
+  content     String   @db.Text
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([doctorId, patientId])
+  @@index([patientId])
+}
+
+model SharedPhoto {
+  id              String   @id @default(cuid())
+  patientId       String
+  doctorId        String
+  photoId         String   // Reference to ProgressPhoto id
+  
+  sharedAt        DateTime @default(now())
+  viewedByDoctor  Boolean  @default(false)
+  viewedAt        DateTime?
+  
+  notes           String?  @db.Text
+  doctorFeedback  String?  @db.Text
+  
+  @@index([doctorId, viewedByDoctor])
+  @@index([patientId])
+}
+
+model DoctorAchievement {
+  id            String   @id @default(cuid())
+  name          String
+  description   String
+  icon          String
+  
+  awardedBy     String   // Doctor ID
+  awardedTo     String   // Patient ID
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([awardedTo])
+}
+
+model PushSubscription {
+  id          String   @id @default(cuid())
+  userId      String
+  endpoint    String   @unique
+  p256dh      String
+  auth        String
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+}
+
+model FCMToken {
+  id          String   @id @default(cuid())
+  userId      String
+  token       String   @unique
+  platform    String   // "android" or "ios"
+  deviceInfo  String?  // Device model, OS version, etc.
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([token])
+}
+
+model WebPushSubscription {
+  id           String   @id @default(cuid())
+  userId       String
+  endpoint     String   @unique
+  subscription String   @db.Text // JSON string of the full subscription object
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([endpoint])
+}
+
+model TreatmentPlan3D {
+  id              String   @id @default(cuid())
+  patientId       String
+  doctorId        String?
+  
+  patientName     String
+  doctorName      String?
+  
+  // Cloud storage paths for uploaded files
+  htmlFilePath    String?  // Path to the uploaded HTML file
+  unitedModelPath String?  // Path to the united (animated) GLB model
+  separateModelPath String? // Path to the separate (editable) GLB model
+  pdfReportPath   String?  // Path to the PDF report
+  
+  // Status and metadata
+  status          String   @default("draft") // "draft", "published"
+  viewCount       Int      @default(0)
+  lastViewedAt    DateTime?
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  toothMovements  ToothMovement[]
+  exportSnapshots ExportSnapshot[]
+  
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+}
+
+model ToothMovement {
+  id              String   @id @default(cuid())
+  planId          String
+  plan            TreatmentPlan3D @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  savedById       String   // User who saved this (doctor or patient)
+  savedByRole     String   // "doctor" or "patient"
+  
+  toothNumber     String   // Tooth identifier
+  toothName       String   // Display name
+  
+  mesialDistal    Float    @default(0) // mm
+  buccalLingual   Float    @default(0) // mm
+  intrusionExtrusion Float @default(0) // mm
+  tip             Float    @default(0) // degrees
+  torque          Float    @default(0) // degrees
+  rotation        Float    @default(0) // degrees
+  
+  notes           String?  @db.Text
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([planId])
+  @@index([savedById])
+}
+
+model ExportSnapshot {
+  id              String   @id @default(cuid())
+  planId          String
+  plan            TreatmentPlan3D @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  exportedById    String   // User who created this export
+  exportedByRole  String   // "doctor" or "patient" or "admin"
+  exportedByName  String   // Display name of exporter
+  
+  fileName        String   // Original filename
+  filePath        String   // Cloud storage path to the JSON file
+  fileSize        Int      @default(0) // Size in bytes
+  
+  description     String?  @db.Text
+  toothCount      Int      @default(0) // Number of teeth with movements
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([planId])
+  @@index([exportedById])
+  @@index([createdAt])
+}

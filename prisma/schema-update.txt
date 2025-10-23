@@ -1,0 +1,25 @@
+
+# Add this to your schema.prisma after the ToothMovement model
+
+model ExportSnapshot {
+  id              String   @id @default(cuid())
+  planId          String
+  plan            TreatmentPlan3D @relation(fields: [planId], references: [id], onDelete: Cascade)
+  
+  exportedById    String   // User who created this export
+  exportedByRole  String   // "doctor" or "patient" or "admin"
+  exportedByName  String   // Display name of exporter
+  
+  fileName        String   // Original filename
+  filePath        String   // Cloud storage path to the JSON file
+  fileSize        Int      @default(0) // Size in bytes
+  
+  description     String?  @db.Text
+  toothCount      Int      @default(0) // Number of teeth with movements
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([planId])
+  @@index([exportedById])
+  @@index([createdAt])
+}
